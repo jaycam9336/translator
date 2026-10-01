@@ -15,6 +15,7 @@
   var mode = null;            // active mode key, or null before first tap
   var translateSeq = 0;
   var pauseTimer = null;
+  var lastOut = null;         // {text, lang} of the translation currently shown in the big output
   var lastDone = null;        // {mode, text} last successfully requested, avoids duplicate translations
 
   function setBtn(key, on) {
@@ -98,12 +99,14 @@
   function doTranslate(key, text) {
     var m = MODES[key], seq = ++translateSeq;
     lastDone = { mode: key, text: text };
+    lastOut = null;
     setStatus('Translating…', 'busy');
     showTr('Translating…', 'busy');
     translate(text, m.from, m.to).then(function (out) {
       if (seq !== translateSeq) return;
       setStatus('Done', 'ok');
       showTr(out);
+      lastOut = { text: out, lang: m.to === 'es' ? 'es-MX' : 'en-US' };
     }, function () {
       if (seq !== translateSeq) return;
       lastDone = null;      // allow retry with the same text
@@ -120,7 +123,7 @@
     cancelPause();
     if (!mode) return;
     var text = cleanText();
-    if (!text) { translateSeq++; lastDone = null; setStatus('Ready', ''); showTr(MODES[mode].prompt, 'hint'); return; }
+    if (!text) { translateSeq++; lastDone = null; lastOut = null; setStatus('Ready', ''); showTr(MODES[mode].prompt, 'hint'); return; }
     if (!force && lastDone && lastDone.mode === mode && lastDone.text === text) return;
     if (force && lastDone && lastDone.mode === mode && lastDone.text === text && statusEl.className === 'ok') return;
     doTranslate(mode, text);
@@ -141,12 +144,12 @@
     cancelPause();
     if (!same) {
       mode = key;
-      translateSeq++; lastDone = null;
+      translateSeq++; lastDone = null; lastOut = null; stopSpeaking();
       inputEl.value = '';
       showTr(m.prompt, 'hint');
     } else if (cleanText()) {
       // tapping the active button again starts a fresh phrase
-      translateSeq++; lastDone = null;
+      translateSeq++; lastDone = null; lastOut = null; stopSpeaking();
       inputEl.value = '';
       showTr(m.prompt, 'hint');
     }
@@ -177,6 +180,84 @@
     go(true);
     inputEl.blur();                              // close keyboard so the big text is visible
   });
+
+  /* ---------- Text to speech (reads the translation in the big output) ---------- */
+  var ttsBtn = $('tts');
+  var synth = window.speechSynthesis;
+  var canSpeak = !!(synth && window.SpeechSynthesisUtterance);
+  var speaking = false, voices = [], speakToken = 0;
+
+  function loadVoices() { try { voices = synth.getVoices() || []; } catch (e) { voices = []; } }
+  if (canSpeak) {
+    loadVoices();
+    if (synth.addEventListener) synth.addEventListener('voiceschanged', loadVoices);
+    else if ('onvoiceschanged' in synth) synth.onvoiceschanged = loadVoices;
+  }
+  function norm(l) { return String(l || '').toLowerCase().replace('_', '-'); }
+  // Natural-voice ranking: Premium/Enhanced/Siri > Google/Natural > any voice in the language.
+  // Locale preference only breaks ties inside a tier (es: MX, US, ES, other es-*; en: en-US first).
+  var LOCALE_PREF = { es: ['es-mx', 'es-us', 'es-es'], en: ['en-us'] };
+  function tierOf(v) {
+    var n = String(v.name || '');
+    if (/premium|enhanced|siri/i.test(n)) return 0;
+    if (/google|natural/i.test(n)) return 1;
+    return 2;
+  }
+  function pickVoice(lang) {
+    if (!voices.length) loadVoices();
+    var base = norm(lang).split('-')[0], pref = LOCALE_PREF[base] || [];
+    var best = null, bestScore = 1e9;
+    for (var i = 0; i < voices.length; i++) {
+      var v = voices[i], l = norm(v.lang);
+      if (l !== base && l.indexOf(base + '-') !== 0) continue;           // wrong language
+      var loc = pref.indexOf(l); if (loc < 0) loc = pref.length;          // unlisted locale ranks last
+      var score = tierOf(v) * 100 + loc * 10 + (v.localService ? 0 : 1);
+      if (score < bestScore) { bestScore = score; best = v; }
+    }
+    return best;
+  }
+  function setTtsBtn(on) {
+    ttsBtn.classList.toggle('on', on);
+    ttsBtn.textContent = on ? 'Stop' : 'Text to Speech';
+  }
+  function stopSpeaking() {
+    speakToken++;
+    speaking = false;
+    setTtsBtn(false);
+    if (canSpeak) { try { synth.cancel(); } catch (e) {} }
+  }
+  function onTts() {
+    if (!canSpeak) { setStatus('Speech playback is not supported on this browser.', 'err'); return; }
+    if (speaking) { stopSpeaking(); setStatus('Stopped', ''); return; }   // second tap stops
+    if (!lastOut || !lastOut.text) { setStatus('Nothing to read yet', 'warn'); return; }
+    try { synth.cancel(); } catch (e) {}                                   // clear anything still queued
+    var token = ++speakToken;
+    var u = new window.SpeechSynthesisUtterance(lastOut.text);              // created inside the tap (iOS gesture rule)
+    var v = pickVoice(lastOut.lang);
+    u.lang = v ? v.lang : lastOut.lang;
+    if (v) u.voice = v;
+    u.rate = 0.95;           // slightly slower than default for clarity
+    u.onstart = function () { if (token === speakToken) setStatus('Speaking…', 'live'); };
+    u.onend = function () {
+      if (token !== speakToken) return;
+      speaking = false; setTtsBtn(false); setStatus('Done', 'ok');
+    };
+    u.onerror = function (ev) {
+      if (token !== speakToken) return;
+      speaking = false; setTtsBtn(false);
+      var e = ev && ev.error;
+      if (e === 'canceled' || e === 'interrupted') return;
+      setStatus('Could not play audio. Check the volume and silent switch.', 'err');
+    };
+    speaking = true; setTtsBtn(true); setStatus('Speaking…', 'live');
+    try { synth.speak(u); }
+    catch (e) { speaking = false; setTtsBtn(false); setStatus('Could not play audio.', 'err'); }
+  }
+  // Keep the keyboard/focus as it is: don't let the tap pull focus off the input (mouse/Android).
+  ttsBtn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+  ttsBtn.addEventListener('click', onTts);
+  if (!canSpeak) { ttsBtn.classList.add('na'); }
+  window.addEventListener('pagehide', function () { if (canSpeak) { try { synth.cancel(); } catch (e) {} } });
 
   // Keep layout fitted to the visible area when the on-screen keyboard opens/closes.
   function onViewport() {

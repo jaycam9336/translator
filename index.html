@@ -32,12 +32,15 @@
   #typed input{width:100%;font-size:20px;padding:12px 14px;border-radius:12px;border:2px solid #4dd0ff;background:#111;color:#fff;font-family:inherit;outline:0;-webkit-appearance:none;appearance:none}
   #typed input:focus{border-color:#ffd600}
   #kbhint{font-size:13px;line-height:1.3;color:#999;padding:0 2px}
-  #btns{flex:0 0 auto;display:flex;gap:10px;height:30dvh;margin-bottom:10px}
+  #btns{flex:0 0 auto;display:flex;gap:10px;height:28dvh;margin-bottom:0}
   body.kb #btns{height:84px}
   body.kb #kbhint{display:none}
   button{flex:1;border:0;border-radius:20px;font-size:44px;font-weight:900;color:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;touch-action:manipulation;font-family:inherit;padding:6px}
   button small{font-size:16px;font-weight:700;opacity:.85}
   body.kb button{font-size:32px}
+  #tts{flex:0 0 48px;height:48px;width:100%;margin-bottom:10px;background:#fff;color:#000;font-size:19px;font-weight:800;border-radius:14px;padding:0;display:block;text-align:center;line-height:48px;-webkit-user-select:none;user-select:none}
+  #tts.on{background:#ff3b30;color:#fff;box-shadow:none}
+  #tts.na{opacity:.5}
   #e2s{background:#ffd600}
   #s2e{background:#4dd0ff}
   button.on{box-shadow:0 0 0 5px #fff inset}
@@ -56,6 +59,7 @@
   <button id="e2s" type="button">E2S<small>English → Español</small></button>
   <button id="s2e" type="button">S2E<small>Español → English</small></button>
 </div>
+<button id="tts" type="button">Text to Speech</button>
 <script src="app.js"></script>
 </body>
 </html>
