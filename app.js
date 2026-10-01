@@ -2,13 +2,13 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var btnE = $('e2s'), btnS = $('s2e'), inputEl = $('typedText'), formEl = $('typed'),
-      hintEl = $('kbhint'), trEl = $('trText'), trBox = $('tr'), statusEl = $('status');
+      hintEl = $('kbhint'), origEl = $('orig'), trEl = $('trText'), trBox = $('tr'), statusEl = $('status');
 
   var MODES = {
     e2s: { btn: btnE, from: 'en', to: 'es', label: 'E2S', sub: 'English → Español', lang: 'en', spell: 'en-US',
-           ph: 'English… tap the keyboard mic to speak', prompt: 'Type or speak English…\nEscriba o hable inglés…' },
+           origLabel: 'English heard', ph: 'English… tap the keyboard mic to speak', prompt: 'Type or speak English…\nEscriba o hable inglés…' },
     s2e: { btn: btnS, from: 'es', to: 'en', label: 'S2E', sub: 'Español → English', lang: 'es', spell: 'es-US',
-           ph: 'Español… toque el micrófono del teclado', prompt: 'Escriba o hable español…\nType or speak Spanish…' }
+           origLabel: 'Español oído', ph: 'Español… toque el micrófono del teclado', prompt: 'Escriba o hable español…\nType or speak Spanish…' }
   };
   var PAUSE_MS = 1200;        // auto-translate this long after the last keystroke / dictation chunk
 
@@ -23,6 +23,12 @@
     MODES[key].btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
   function setStatus(text, cls) { statusEl.className = cls || ''; statusEl.textContent = text || ''; }
+  function showOrig(key, text) {
+    origEl.textContent = '';
+    if (!text) return;
+    var b = document.createElement('b'); b.textContent = MODES[key].origLabel + ': ';
+    origEl.appendChild(b); origEl.appendChild(document.createTextNode(text));
+  }
   function showTr(text, cls) {
     trEl.className = cls || '';
     trEl.style.fontSize = '';
@@ -107,6 +113,8 @@
       setStatus('Done', 'ok');
       showTr(out);
       lastOut = { text: out, lang: m.to === 'es' ? 'es-MX' : 'en-US' };
+      showOrig(key, text);
+      clearInputAfterSuccess(text);
     }, function () {
       if (seq !== translateSeq) return;
       lastDone = null;      // allow retry with the same text
@@ -119,20 +127,37 @@
   function cleanText() { return (inputEl.value || '').replace(/\s+/g, ' ').trim(); }
   function cancelPause() { if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; } }
 
+  // After a successful translation the input is emptied so the next phrase can start right away.
+  // Only clear if the box still holds exactly what was translated (never throw away newer typing).
+  // Setting .value programmatically fires no 'input' event; the guard flag also covers browsers that do.
+  var clearing = false;
+  function clearInputAfterSuccess(text) {
+    if (cleanText() !== text) return;
+    clearing = true;
+    inputEl.value = '';
+    clearing = false;
+    lastDone = null;          // same phrase may be translated again
+    // focus is left exactly as it is: still focused (keyboard open) after the pause path,
+    // still blurred after Enter.
+  }
+
   function go(force) {
     cancelPause();
     if (!mode) return;
     var text = cleanText();
-    if (!text) { translateSeq++; lastDone = null; lastOut = null; setStatus('Ready', ''); showTr(MODES[mode].prompt, 'hint'); return; }
+    if (!text) { translateSeq++; lastDone = null; lastOut = null; showOrig(mode, ''); setStatus('Ready', ''); showTr(MODES[mode].prompt, 'hint'); return; }
     if (!force && lastDone && lastDone.mode === mode && lastDone.text === text) return;
     if (force && lastDone && lastDone.mode === mode && lastDone.text === text && statusEl.className === 'ok') return;
     doTranslate(mode, text);
   }
 
   function onInput() {
-    if (!mode) return;
+    if (!mode || clearing) return;
     cancelPause();
-    if (!cleanText()) { go(false); return; }
+    if (!cleanText()) {
+      if (lastOut) { setStatus('Ready', ''); return; }   // output of the last translation stays up
+      go(false); return;
+    }
     translateSeq++;                              // an older translation must not overwrite newer typing
     setStatus('Typing… (translates when you pause)', 'live');
     pauseTimer = setTimeout(function () { pauseTimer = null; go(false); }, PAUSE_MS);
@@ -144,12 +169,12 @@
     cancelPause();
     if (!same) {
       mode = key;
-      translateSeq++; lastDone = null; lastOut = null; stopSpeaking();
+      translateSeq++; lastDone = null; lastOut = null; stopSpeaking(); showOrig(key, '');
       inputEl.value = '';
       showTr(m.prompt, 'hint');
     } else if (cleanText()) {
       // tapping the active button again starts a fresh phrase
-      translateSeq++; lastDone = null; lastOut = null; stopSpeaking();
+      translateSeq++; lastDone = null; lastOut = null; stopSpeaking(); showOrig(key, '');
       inputEl.value = '';
       showTr(m.prompt, 'hint');
     }
