@@ -2,7 +2,7 @@
   'use strict';
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var $ = function (id) { return document.getElementById(id); };
-  var btnE = $('e2s'), btnS = $('s2e'), origEl = $('orig'), trEl = $('trText'), trBox = $('tr'), statusEl = $('status');
+  var btnE = $('e2s'), btnS = $('s2e'), origEl = $('orig'), trEl = $('trText'), trBox = $('tr'), statusEl = $('status'), hintEl = $('hint');
 
   var MODES = {
     e2s: { btn: btnE, rec: ['en-US'], from: 'en', to: 'es', label: 'E2S', sub: 'English → Español', origLabel: 'English heard' },
@@ -10,6 +10,18 @@
   };
 
   var translateSeq = 0;
+
+  // iOS home-screen (standalone) apps have flaky speech recognition
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var isStandalone = !!navigator.standalone ||
+              (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  var IOS_HINT = 'Speech can be unreliable in the home-screen app. Try opening this page in Safari, or use the box below.';
+  function setHint(on) {
+    hintEl.textContent = on ? IOS_HINT : '';
+    hintEl.classList.toggle('show', !!on);
+  }
+  function maybeHint() { if (isIOS && isStandalone) setHint(true); }
 
   function setBtn(mode, on) {
     var m = MODES[mode];
@@ -39,6 +51,7 @@
     btnE.disabled = btnS.disabled = true;
     showError('This browser cannot listen to speech. Please open this page in Chrome (Android) or Safari (iPhone).\nEste navegador no puede escuchar. Use Chrome (Android) o Safari (iPhone).');
     trEl.style.whiteSpace = 'pre-line';
+    setStatus('Speech not available - use the box below', 'err');
   }
   if (location.protocol !== 'https:' && location.hostname !== 'localhost' && SR) {
     showError('The microphone needs a secure (https) page.');
@@ -168,6 +181,7 @@
     if (opts.error && !text) {
       setStatus(opts.status || 'Problem', 'err');
       showError(opts.error);
+      maybeHint();
       return;
     }
     if (text) {
@@ -178,6 +192,7 @@
       setStatus('Heard nothing', 'warn');
       trEl.style.whiteSpace = 'pre-line';
       showTr("I didn't hear anything, tap and try again.\nNo oí nada. Toque e intente de nuevo.", 'hint');
+      maybeHint();
     }
   }
 
@@ -197,6 +212,7 @@
     var hadOld = abortCurrent();
     translateSeq++;          // cancel any in-flight translation display
     trEl.style.whiteSpace = '';
+    setHint(false);
     setHeard(mode, '', true);
     showTr(mode === 'e2s' ? 'Listening… speak English' : 'Escuchando… hable español', 'hint');
     setStatus('Starting microphone…', 'busy');
@@ -314,6 +330,24 @@
     }
     start(mode);                           // idle, or other button: always a fresh recognizer
   }
+
+  /* ---------- Typed / keyboard-dictation backup ---------- */
+  var typedEl = $('typedText'), lastDir = 'e2s';
+  function submitTyped(mode) {
+    var text = (typedEl.value || '').replace(/\s+/g, ' ').trim();
+    lastDir = mode;
+    if (!text) { setStatus('Type or dictate something first', 'warn'); typedEl.focus(); return; }
+    abortCurrent();                        // stop any speech session; shares the same output
+    trEl.style.whiteSpace = '';
+    setHint(false);
+    setHeard(mode, text, false);
+    setStatus('Translating…', 'busy');
+    typedEl.blur();                        // hide keyboard so the big output is visible
+    doTranslate(mode, text);
+  }
+  $('tEN').addEventListener('click', function () { submitTyped('e2s'); });
+  $('tES').addEventListener('click', function () { submitTyped('s2e'); });
+  $('typed').addEventListener('submit', function (ev) { ev.preventDefault(); submitTyped(lastDir); });
 
   // Leaving the page / backgrounding the app kills the mic; never leave the UI stuck.
   function onHidden() {
