@@ -10,7 +10,7 @@
     s2e: { btn: btnS, from: 'es', to: 'en', label: 'S2E', sub: 'Español → English', lang: 'es', spell: 'es-US',
            origLabel: 'Español oído', ph: 'Español… toque el micrófono del teclado', prompt: 'Escriba o hable español…\nType or speak Spanish…' }
   };
-  var PAUSE_MS = 1200;        // auto-translate this long after the last keystroke / dictation chunk
+  var PAUSE_MS = 2500;        // auto-translate after this many ms of NO input; every keystroke / dictation chunk restarts it
 
   var mode = null;            // active mode key, or null before first tap
   var translateSeq = 0;
@@ -159,7 +159,7 @@
       go(false); return;
     }
     translateSeq++;                              // an older translation must not overwrite newer typing
-    setStatus('Typing… (translates when you pause)', 'live');
+    setStatus('Typing… (translates after a ' + (PAUSE_MS / 1000) + ' second pause)', 'live');
     pauseTimer = setTimeout(function () { pauseTimer = null; go(false); }, PAUSE_MS);
   }
 

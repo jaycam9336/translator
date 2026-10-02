@@ -1,4 +1,4 @@
-const CACHE = 'spanslator-v7';
+const CACHE = 'spanslator-v8';
 const ASSETS = ['./', './index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
   // cache:'reload' bypasses the browser HTTP cache (GitHub Pages sends max-age=600)
