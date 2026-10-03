@@ -33,6 +33,13 @@
   #typed input{width:100%;font-size:20px;padding:12px 14px;border-radius:12px;border:2px solid #4dd0ff;background:#111;color:#fff;font-family:inherit;outline:0;-webkit-appearance:none;appearance:none}
   #typed input:focus{border-color:#ffd600}
   #typed input:disabled{border-color:#444;opacity:.6}
+  #mic{flex:0 0 auto;width:100%;height:44px;font-size:17px;font-weight:800;border-radius:12px;padding:0;display:block;text-align:center;background:#222;color:#fff;border:2px solid #666}
+  @keyframes pulse{50%{filter:brightness(.7)}}
+  #mic:disabled{opacity:.4}
+  #mic.on{background:#ff3b30;border-color:#ff3b30;color:#fff;animation:pulse 1s infinite}
+  #mic.na{opacity:.6}
+  #michint{font-size:13px;line-height:1.3;color:#ffb340}
+  #michint:empty{display:none}
   #kbhint{font-size:13px;line-height:1.3;color:#999;padding:0 2px}
   #btns{flex:0 0 auto;display:flex;gap:10px;height:28dvh;margin-bottom:0}
   body.kb #btns{height:84px}
@@ -56,6 +63,8 @@
 </div>
 <form id="typed" autocomplete="off" action="#">
   <input id="typedText" type="text" lang="en" disabled enterkeyhint="go" autocapitalize="sentences" autocorrect="on" autocomplete="off" spellcheck="true" placeholder="Tap E2S or S2E first · Toque E2S o S2E" aria-label="Text to translate">
+  <button id="mic" type="button" disabled>🎤 Listen / Escuchar</button>
+  <div id="michint" role="note"></div>
   <div id="kbhint">For Spanish voice, tap the 🌐 key to switch to the Spanish keyboard first.</div>
 </form>
 <div id="btns">

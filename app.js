@@ -2,13 +2,13 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var btnE = $('e2s'), btnS = $('s2e'), inputEl = $('typedText'), formEl = $('typed'),
-      hintEl = $('kbhint'), origEl = $('orig'), trEl = $('trText'), trBox = $('tr'), statusEl = $('status');
+      hintEl = $('kbhint'), micBtn = $('mic'), micHintEl = $('michint'), origEl = $('orig'), trEl = $('trText'), trBox = $('tr'), statusEl = $('status');
 
   var MODES = {
     e2s: { btn: btnE, from: 'en', to: 'es', label: 'E2S', sub: 'English → Español', lang: 'en', spell: 'en-US',
-           origLabel: 'English heard', ph: 'English… tap the keyboard mic to speak', prompt: 'Type or speak English…\nEscriba o hable inglés…' },
+           rec: ['en-US'], micLabel: '🎤 Listen in English', listenMsg: 'Listening… speak English', origLabel: 'English heard', ph: 'English… tap the keyboard mic to speak', prompt: 'Type or speak English…\nEscriba o hable inglés…' },
     s2e: { btn: btnS, from: 'es', to: 'en', label: 'S2E', sub: 'Español → English', lang: 'es', spell: 'es-US',
-           origLabel: 'Español oído', ph: 'Español… toque el micrófono del teclado', prompt: 'Escriba o hable español…\nType or speak Spanish…' }
+           rec: ['es-US', 'es-MX'], micLabel: '🎤 Escuchar / Listen in Spanish', listenMsg: 'Escuchando… hable español', origLabel: 'Español oído', ph: 'Español… toque el micrófono del teclado', prompt: 'Escriba o hable español…\nType or speak Spanish…' }
   };
   var PAUSE_MS = 2500;        // auto-translate after this many ms of NO input; every keystroke / dictation chunk restarts it
 
@@ -167,6 +167,7 @@
     var m = MODES[key];
     var same = (mode === key);
     cancelPause();
+    abortListen();                 // a mode switch discards any live recognition (no translate)
     if (!same) {
       mode = key;
       translateSeq++; lastDone = null; lastOut = null; stopSpeaking(); showOrig(key, '');
@@ -189,6 +190,7 @@
     inputEl.setAttribute('enterkeyhint', 'go');
     trEl.style.whiteSpace = 'pre-line';
     inputEl.disabled = false;      // enabled in the same tick, right before focus()
+    micBtn.disabled = false; micBtn.textContent = m.micLabel; micHintEl.textContent = '';
     setStatus('Ready – type, or tap the keyboard mic', '');
     // focus synchronously inside the tap handler so iOS opens the keyboard
     try { inputEl.focus({ preventScroll: true }); } catch (e) { try { inputEl.focus(); } catch (e2) {} }
@@ -260,6 +262,7 @@
     if (canSpeak) { try { synth.cancel(); } catch (e) {} }
   }
   function onTts() {
+    if (session) abortListen();            // never let the mic pick up our own playback
     if (!canSpeak) { setStatus('Speech playback is not supported on this browser.', 'err'); return; }
     if (speaking) { stopSpeaking(); setStatus('Stopped', ''); return; }   // second tap stops
     if (!lastOut || !lastOut.text) { setStatus('Nothing to read yet', 'warn'); return; }
@@ -291,6 +294,186 @@
   ttsBtn.addEventListener('click', onTts);
   if (!canSpeak) { ttsBtn.classList.add('na'); }
   window.addEventListener('pagehide', function () { if (canSpeak) { try { synth.cancel(); } catch (e) {} } });
+
+  /* ---------- Built-in speech recognition (mic button) ---------- */
+  // Fresh SpeechRecognition per tap, wrapped in a session object. Every handler checks it still
+  // belongs to the current session, so late events from an old/aborted recognizer do nothing.
+  // finishListen() is the ONE teardown: idempotent, reachable from onend, onerror, tap-stop,
+  // the watchdogs and page-hide, so the UI can never stay stuck on "Listening".
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var isStandalone = !!navigator.standalone ||
+              (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  var IOS_HINT = 'Speech can be unreliable in the home-screen app. Try Safari, or use the keyboard mic.';
+  var T_START_WAIT = 15000;  // mic never started (permission prompt can take a while)
+  var T_NO_SPEECH  = 8000;   // started, but nothing heard
+  var T_STALL      = 4000;   // got interim text, but no more results and no onend
+  var T_FINAL_WAIT = 1200;   // got a final result, but no onend
+  var T_STOP_WAIT  = 1500;   // after tap-stop, onend did not arrive
+  var session = null, sessionSeq = 0;
+
+  function clearTimers(s) { if (s.timer) { clearTimeout(s.timer); s.timer = null; } }
+  function arm(s, ms, fn) { clearTimers(s); s.timer = setTimeout(function () { if (session === s) fn(); }, ms); }
+  function detach(s) {
+    var r = s.rec;
+    if (!r) return;
+    r.onstart = r.onaudiostart = r.onspeechstart = r.onresult = r.onerror = r.onend = r.onnomatch = null;
+    try { r.abort(); } catch (e) {}
+    s.rec = null;
+  }
+  function setMicUi(on) {
+    micBtn.classList.toggle('on', on);
+    micBtn.textContent = on ? '■ Stop' : (mode ? MODES[mode].micLabel : '🎤 Listen / Escuchar');
+    inputEl.readOnly = on;      // typing is paused while the recognizer owns the box
+  }
+  function maybeIosHint() { micHintEl.textContent = (isIOS && isStandalone) ? IOS_HINT : ''; }
+
+  // Drop the session without translating (mode switch, TTS tap).
+  function abortListen() {
+    var s = session;
+    if (!s) return;
+    session = null;
+    clearTimers(s);
+    detach(s);
+    setMicUi(false);
+  }
+
+  // Tear down the session; translate whatever was heard (final or last interim), else report.
+  function finishListen(s, opts) {
+    if (session !== s) return;
+    opts = opts || {};
+    session = null;
+    clearTimers(s);
+    detach(s);
+    setMicUi(false);
+    var text = (s.text || '').replace(/\s+/g, ' ').trim();
+    try { inputEl.blur(); } catch (e) {}
+    if (text) {
+      micHintEl.textContent = '';
+      inputEl.value = text;
+      go(true);                          // same translate-and-clear flow as typing / Enter
+      return;
+    }
+    inputEl.value = '';
+    lastOut = null; lastDone = null; showOrig(s.mode, '');
+    maybeIosHint();
+    if (opts.error) {
+      setStatus(opts.status || 'Problem', 'err');
+      showError(opts.error);
+    } else {
+      setStatus('Heard nothing', 'warn');
+      trEl.style.whiteSpace = 'pre-line';
+      showTr("I didn't hear anything, tap and try again.\nNo oí nada. Toque e intente de nuevo.", 'hint');
+    }
+  }
+
+  function startListening() {
+    if (!mode) { setStatus('Tap E2S or S2E first', 'warn'); return; }
+    if (!SR) {
+      setStatus('Speech recognition is not available here – use the keyboard mic', 'err');
+      maybeIosHint();
+      return;
+    }
+    var cur = session;
+    if (cur) {                           // second tap: stop and translate what we have
+      if (cur.stopping) return;
+      cur.stopping = true;
+      setStatus('Stopping…', 'busy');
+      try { if (cur.rec) cur.rec.stop(); } catch (e) {}
+      arm(cur, T_STOP_WAIT, function () { finishListen(cur); });   // onend may never come on iOS
+      return;
+    }
+    cancelPause(); stopSpeaking();
+    translateSeq++; lastDone = null; lastOut = null;   // cancel any in-flight translation
+    micHintEl.textContent = '';
+    showOrig(mode, '');
+    inputEl.value = '';
+    try { inputEl.blur(); } catch (e) {}               // close the keyboard; the recognizer owns the box now
+    trEl.style.whiteSpace = 'pre-line';
+    showTr(MODES[mode].listenMsg, 'hint');
+    setStatus('Starting microphone…', 'busy');
+    var s = { id: ++sessionSeq, mode: mode, text: '', gotFinal: false, recIndex: 0, stopping: false, rec: null, timer: null };
+    session = s;
+    setMicUi(true);
+    listen(s);                           // synchronously inside the tap (iOS gesture rule)
+  }
+
+  function listen(s) {
+    var m = MODES[s.mode];
+    var r;
+    try { r = new SR(); } catch (e) { finishListen(s, { error: 'Could not start the microphone. Try again.', status: 'Mic problem' }); return; }
+    s.rec = r;
+    r.lang = m.rec[s.recIndex];
+    r.interimResults = true;
+    r.continuous = false;
+    r.maxAlternatives = 1;
+    function mine() { return session === s && s.rec === r; }
+    r.onstart = function () {
+      if (!mine()) return;
+      setStatus('Listening…', 'live');
+      arm(s, T_NO_SPEECH, function () { finishListen(s); });
+    };
+    r.onspeechstart = function () { if (mine()) setStatus('Hearing you…', 'live'); };
+    r.onresult = function (ev) {
+      if (!mine()) return;
+      var interim = '', fin = '';
+      for (var i = 0; i < ev.results.length; i++) {
+        var res = ev.results[i];
+        if (!res || !res[0]) continue;
+        if (res.isFinal) fin += res[0].transcript; else interim += res[0].transcript;
+      }
+      var text = (fin + ' ' + interim).replace(/\s+/g, ' ').trim();
+      if (text) s.text = text;           // keep the last non-empty transcript (interim or final)
+      if (fin) s.gotFinal = true;
+      if (s.text) inputEl.value = s.text;            // live text in the box
+      if (s.text) setStatus(s.gotFinal ? 'Got it…' : 'Hearing you…', 'live');
+      if (!s.stopping) arm(s, s.gotFinal ? T_FINAL_WAIT : T_STALL, function () { finishListen(s); });
+    };
+    r.onerror = function (ev) {
+      if (!mine()) return;
+      var e = ev && ev.error;
+      if (e === 'no-speech') { finishListen(s); return; }
+      if (e === 'aborted') { finishListen(s, { error: 'Listening was interrupted. Tap 🎤 and try again.', status: 'Interrupted' }); return; }
+      if (e === 'language-not-supported' && s.recIndex < m.rec.length - 1) {
+        s.recIndex++;                    // bounded fallback: each locale tried at most once, no loop
+        detach(s);
+        listen(s);
+        return;
+      }
+      var msg, st;
+      if (e === 'not-allowed' || e === 'service-not-allowed') {
+        st = 'Mic blocked';
+        msg = 'Microphone or speech recognition is blocked. Allow it in Settings (Safari / Siri & Dictation), or use the keyboard mic.';
+      } else if (e === 'audio-capture') {
+        st = 'No microphone';
+        msg = 'No microphone found, or another app is using it. Close other apps using the mic and try again.';
+      } else if (e === 'network') {
+        st = 'No connection';
+        msg = 'Speech recognition needs an internet connection. Check your signal and try again.';
+      } else if (e === 'language-not-supported') {
+        st = 'Language not supported';
+        msg = 'This phone does not support that language for speech. Use the keyboard mic instead.';
+      } else {
+        st = 'Speech error';
+        msg = 'Speech error (' + e + '). Tap 🎤 and try again, or use the keyboard mic.';
+      }
+      finishListen(s, { error: msg, status: st });
+    };
+    r.onend = function () { if (mine()) finishListen(s); };
+    arm(s, T_START_WAIT, function () {
+      finishListen(s, { error: 'The microphone did not start. Check permission and tap 🎤 to try again.', status: 'Mic did not start' });
+    });
+    try { r.start(); }
+    catch (e) { finishListen(s, { error: 'Could not start the microphone. Try again.', status: 'Mic problem' }); }
+  }
+
+  if (!SR) micBtn.classList.add('na');
+  micBtn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+  micBtn.addEventListener('click', startListening);
+  // Backgrounding the app kills the mic; never leave the UI stuck.
+  document.addEventListener('visibilitychange', function () { if (document.hidden && session) finishListen(session); });
+  window.addEventListener('pagehide', function () { if (session) finishListen(session); });
 
   // Keep layout fitted to the visible area when the on-screen keyboard opens/closes.
   function onViewport() {
