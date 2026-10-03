@@ -188,14 +188,22 @@
     inputEl.setAttribute('autocorrect', 'on');
     inputEl.setAttribute('enterkeyhint', 'go');
     trEl.style.whiteSpace = 'pre-line';
-    formEl.classList.add('show');
+    inputEl.disabled = false;      // enabled in the same tick, right before focus()
     setStatus('Ready – type, or tap the keyboard mic', '');
     // focus synchronously inside the tap handler so iOS opens the keyboard
-    try { inputEl.focus(); } catch (e) {}
+    try { inputEl.focus({ preventScroll: true }); } catch (e) { try { inputEl.focus(); } catch (e2) {} }
+    if (document.activeElement !== inputEl) { try { inputEl.focus(); } catch (e3) {} }
   }
 
   btnE.addEventListener('click', function () { selectMode('e2s'); });
   btnS.addEventListener('click', function () { selectMode('s2e'); });
+  // Pressing a big button must not move focus off the input (that blurs it, collapses the iOS
+  // keyboard, then the click re-focuses it -> flicker, and sometimes the keyboard does not return).
+  // Preventing the default of the press keeps the input focused; click still fires normally.
+  [btnE, btnS].forEach(function (b) {
+    b.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+    b.addEventListener('pointerdown', function (ev) { if (ev.pointerType === 'mouse') ev.preventDefault(); });
+  });
   inputEl.addEventListener('input', onInput);
   inputEl.addEventListener('compositionend', onInput);
   formEl.addEventListener('submit', function (ev) {
@@ -307,12 +315,14 @@
         try { reg.update(); } catch (e) {}
       }).catch(function () {});
     });
-    // A new service worker took over (new app version): reload once, but not while the user has text.
+    // A new service worker took over (new app version). Never reload once the user has picked a mode
+    // (that would reset the mode, drop focus and close the keyboard mid-use); the new version is used
+    // on the next launch. Reload only if the page is still untouched.
     var hadController = !!navigator.serviceWorker.controller, reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadController || reloaded) { hadController = true; return; }
       reloaded = true;
-      if (!cleanText()) location.reload();
+      if (!mode && !cleanText()) location.reload();
     });
   }
 })();

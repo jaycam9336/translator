@@ -29,10 +29,10 @@
   #trText.hint{font-size:24px;font-weight:600;color:#888}
   #trText.err{font-size:26px;color:#ff6b6b}
   #trText.busy{font-size:28px;color:#ffd600}
-  #typed{flex:0 0 auto;display:none;flex-direction:column;gap:4px}
-  #typed.show{display:flex}
+  #typed{flex:0 0 auto;display:flex;flex-direction:column;gap:4px}
   #typed input{width:100%;font-size:20px;padding:12px 14px;border-radius:12px;border:2px solid #4dd0ff;background:#111;color:#fff;font-family:inherit;outline:0;-webkit-appearance:none;appearance:none}
   #typed input:focus{border-color:#ffd600}
+  #typed input:disabled{border-color:#444;opacity:.6}
   #kbhint{font-size:13px;line-height:1.3;color:#999;padding:0 2px}
   #btns{flex:0 0 auto;display:flex;gap:10px;height:28dvh;margin-bottom:0}
   body.kb #btns{height:84px}
@@ -55,7 +55,7 @@
   <div id="tr"><div id="trText" class="hint">Tap a button, then type or use the keyboard mic.<br>Toque un botón y escriba o use el micrófono del teclado.</div></div>
 </div>
 <form id="typed" autocomplete="off" action="#">
-  <input id="typedText" type="text" lang="en" enterkeyhint="go" autocapitalize="sentences" autocorrect="on" autocomplete="off" spellcheck="true" placeholder="English… tap the keyboard mic to speak" aria-label="Text to translate">
+  <input id="typedText" type="text" lang="en" disabled enterkeyhint="go" autocapitalize="sentences" autocorrect="on" autocomplete="off" spellcheck="true" placeholder="Tap E2S or S2E first · Toque E2S o S2E" aria-label="Text to translate">
   <div id="kbhint">For Spanish voice, tap the 🌐 key to switch to the Spanish keyboard first.</div>
 </form>
 <div id="btns">
